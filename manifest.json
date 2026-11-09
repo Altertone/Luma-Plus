@@ -1,0 +1,11 @@
+[
+  {
+    "name": "Luma Plus",
+    "description": "Companion extension for Luma Lyrics: per-track sync offsets, overlay keyboard shortcuts, and focus-lyrics mode. Fully compatible alongside Luma.",
+    "preview": "preview.svg",
+    "main": "luma-plus.js",
+    "readme": "README.md",
+    "authors": [{ "name": "Sasha" }],
+    "tags": ["lyrics", "luma", "companion", "accessibility"]
+  }
+]

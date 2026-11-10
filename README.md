@@ -1,6 +1,6 @@
 # Luma Plus
 
-Companion Spicetify **extension** for [Luma Lyrics](https://github.com/Shahisha1/Luma-Lyrics). It adds optional power features without bloating the core overlay.
+Companion Spicetify **extension** for [Luma Lyrics](https://github.com/Altertone/Luma-Lyrics). It adds optional power features without bloating the core overlay.
 
 ## Features
 - **Per-track sync offset memory** — remembers your lyrics timing adjustment per track (namespaced: `luma-plus:track-offsets`).

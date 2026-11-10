@@ -11,9 +11,16 @@
   const MAX_OFFSETS = 400;
 
   const defaultConfig = { shortcuts: true, rememberOffsets: true };
+  const clampOffset = (ms) =>
+    Math.max(-5000, Math.min(5000, Math.round(Number(ms) || 0)));
+
   const loadJson = (k, d) => {
     try {
-      return { ...d, ...JSON.parse(localStorage.getItem(k) || "{}") };
+      const value = JSON.parse(localStorage.getItem(k) || "{}");
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ...d };
+      }
+      return { ...d, ...value };
     } catch {
       return { ...d };
     }
@@ -24,7 +31,19 @@
     } catch {}
   };
   let config = loadJson(CFG_KEY, defaultConfig);
+  config = {
+    shortcuts: config.shortcuts !== false,
+    rememberOffsets: config.rememberOffsets !== false,
+  };
   let offsets = loadJson(OFFSET_KEY, {});
+  for (const [uri, ms] of Object.entries(offsets)) {
+    if (!uri || !Number.isFinite(ms)) delete offsets[uri];
+    else offsets[uri] = clampOffset(ms);
+  }
+  const storedOffsetKeys = Object.keys(offsets);
+  if (storedOffsetKeys.length > MAX_OFFSETS) {
+    for (const uri of storedOffsetKeys.slice(0, -MAX_OFFSETS)) delete offsets[uri];
+  }
 
   const style = document.createElement("style");
   style.id = "luma-plus-style";
@@ -55,8 +74,23 @@
     return !!r && !r.hidden;
   };
 
+  function currentOffset() {
+    const api = globalThis.LumaLyrics;
+    if (api && typeof api.getState === "function") {
+      const value = Number(api.getState()?.syncOffset);
+      if (Number.isFinite(value)) return clampOffset(value);
+    }
+    try {
+      const settings = JSON.parse(localStorage.getItem("luma-settings") || "{}");
+      const value = Number(settings?.syncOffset);
+      return Number.isFinite(value) ? clampOffset(value) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   function applyOffset(ms) {
-    const v = Math.max(-5000, Math.min(5000, Math.round(ms)));
+    const v = clampOffset(ms);
     const api = globalThis.LumaLyrics;
     if (api && typeof api.setSyncOffset === "function") {
       api.setSyncOffset(v);
@@ -74,7 +108,7 @@
 
   function rememberOffsetForTrack(uri, ms) {
     if (!config.rememberOffsets || !uri) return;
-    offsets[uri] = Math.max(-5000, Math.min(5000, Math.round(ms)));
+    offsets[uri] = clampOffset(ms);
     const keys = Object.keys(offsets);
     if (keys.length > MAX_OFFSETS) {
       for (const k of keys.slice(0, keys.length - MAX_OFFSETS)) delete offsets[k];
@@ -83,21 +117,18 @@
   }
 
   function restoreOffsetForTrack(uri) {
-    if (!config.rememberOffsets || !uri) return;
-    const ms = offsets[uri];
-    if (typeof ms === "number") applyOffset(ms);
+    if (!uri) return;
+    // Always set an offset for the newly selected track. Otherwise a track
+    // without a saved value inherits the previous track's timing adjustment.
+    const ms =
+      config.rememberOffsets && typeof offsets[uri] === "number"
+        ? offsets[uri]
+        : 0;
+    applyOffset(ms);
   }
 
   function nudgeOffset(delta) {
-    const api = globalThis.LumaLyrics;
-    let current = 0;
-    if (api && typeof api.getState === "function") current = api.getState()?.syncOffset ?? 0;
-    else {
-      try {
-        current = Number(JSON.parse(localStorage.getItem("luma-settings") || "{}").syncOffset || 0);
-      } catch {}
-    }
-    const next = current + delta;
+    const next = clampOffset(currentOffset() + delta);
     applyOffset(next);
     rememberOffsetForTrack(getTrackUri(), next);
     toast(`Lyrics sync ${next > 0 ? "+" : ""}${(next / 1000).toFixed(2)}s`);
@@ -150,7 +181,7 @@
         nudgeOffset(50);
       } else if (k === "0") {
         e.preventDefault();
-        nudgeOffset(-(Number(JSON.parse(localStorage.getItem("luma-settings") || "{}").syncOffset || 0)));
+        applyOffset(0);
         rememberOffsetForTrack(getTrackUri(), 0);
         toast("Lyrics sync reset");
       }
@@ -182,8 +213,13 @@
   globalThis.LumaPlus = {
     version: "1.0.0",
     getConfig: () => ({ ...config }),
-    setConfig: (next) => {
-      config = { ...config, ...next };
+    setConfig: (next = {}) => {
+      if (!next || typeof next !== "object" || Array.isArray(next)) return;
+      if (typeof next.shortcuts === "boolean") config.shortcuts = next.shortcuts;
+      if (typeof next.rememberOffsets === "boolean") {
+        config.rememberOffsets = next.rememberOffsets;
+        if (!config.rememberOffsets) applyOffset(0);
+      }
       saveJson(CFG_KEY, config);
     },
   };

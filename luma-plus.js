@@ -1,4 +1,42 @@
 // Luma Plus — companion for Luma Lyrics (Spicetify extension)
+/* <luma-plus-pure> */
+function clampOffset(ms) {
+  const value = Number(ms);
+  return Number.isFinite(value)
+    ? Math.max(-5000, Math.min(5000, Math.round(value)))
+    : 0;
+}
+
+function normalizeConfig(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { shortcuts: true, rememberOffsets: true };
+  }
+  return {
+    shortcuts: value.shortcuts !== false,
+    rememberOffsets: value.rememberOffsets !== false,
+  };
+}
+
+function normalizeOffsets(value, limit = 400) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const valid = Object.entries(value).filter(
+    ([uri, ms]) => uri && Number.isFinite(ms),
+  );
+  return Object.fromEntries(
+    valid.slice(-Math.max(0, limit)).map(([uri, ms]) => [uri, clampOffset(ms)]),
+  );
+}
+
+function readStoredOffset(raw) {
+  try {
+    const settings = JSON.parse(raw || "{}");
+    return clampOffset(settings?.syncOffset);
+  } catch {
+    return 0;
+  }
+}
+/* </luma-plus-pure> */
+
 (async () => {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   while (!globalThis.Spicetify?.Player || !document.body) await wait(300);
@@ -11,8 +49,7 @@
   const MAX_OFFSETS = 400;
 
   const defaultConfig = { shortcuts: true, rememberOffsets: true };
-  const clampOffset = (ms) =>
-    Math.max(-5000, Math.min(5000, Math.round(Number(ms) || 0)));
+
 
   const loadJson = (k, d) => {
     try {
@@ -30,20 +67,8 @@
       localStorage.setItem(k, JSON.stringify(v));
     } catch {}
   };
-  let config = loadJson(CFG_KEY, defaultConfig);
-  config = {
-    shortcuts: config.shortcuts !== false,
-    rememberOffsets: config.rememberOffsets !== false,
-  };
-  let offsets = loadJson(OFFSET_KEY, {});
-  for (const [uri, ms] of Object.entries(offsets)) {
-    if (!uri || !Number.isFinite(ms)) delete offsets[uri];
-    else offsets[uri] = clampOffset(ms);
-  }
-  const storedOffsetKeys = Object.keys(offsets);
-  if (storedOffsetKeys.length > MAX_OFFSETS) {
-    for (const uri of storedOffsetKeys.slice(0, -MAX_OFFSETS)) delete offsets[uri];
-  }
+  let config = normalizeConfig(loadJson(CFG_KEY, defaultConfig));
+  let offsets = normalizeOffsets(loadJson(OFFSET_KEY, {}), MAX_OFFSETS);
 
   const style = document.createElement("style");
   style.id = "luma-plus-style";
@@ -77,16 +102,12 @@
   function currentOffset() {
     const api = globalThis.LumaLyrics;
     if (api && typeof api.getState === "function") {
-      const value = Number(api.getState()?.syncOffset);
-      if (Number.isFinite(value)) return clampOffset(value);
+      try {
+        const value = Number(api.getState()?.syncOffset);
+        if (Number.isFinite(value)) return clampOffset(value);
+      } catch {}
     }
-    try {
-      const settings = JSON.parse(localStorage.getItem("luma-settings") || "{}");
-      const value = Number(settings?.syncOffset);
-      return Number.isFinite(value) ? clampOffset(value) : 0;
-    } catch {
-      return 0;
-    }
+    return readStoredOffset(localStorage.getItem("luma-settings"));
   }
 
   function applyOffset(ms) {

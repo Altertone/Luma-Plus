@@ -245,7 +245,7 @@ function readStoredOffset(raw) {
   onTrack();
 
   globalThis.LumaPlus = {
-    version: "1.0.0",
+    version: "1.0.1",
     getConfig: () => ({ ...config }),
     setConfig: (next = {}) => {
       if (!next || typeof next !== "object" || Array.isArray(next)) return;

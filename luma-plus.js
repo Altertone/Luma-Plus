@@ -22,8 +22,10 @@ function normalizeOffsets(value, limit = 400) {
   const valid = Object.entries(value).filter(
     ([uri, ms]) => uri && Number.isFinite(ms),
   );
+  const max = Math.max(0, Math.floor(Number(limit) || 0));
+  const kept = max ? valid.slice(-max) : [];
   return Object.fromEntries(
-    valid.slice(-Math.max(0, limit)).map(([uri, ms]) => [uri, clampOffset(ms)]),
+    kept.map(([uri, ms]) => [uri, clampOffset(ms)]),
   );
 }
 

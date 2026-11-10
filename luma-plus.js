@@ -139,6 +139,7 @@ function readStoredOffset(raw) {
     saveJson(OFFSET_KEY, offsets);
   }
 
+  let restoringTrackOffset = false;
   function restoreOffsetForTrack(uri) {
     if (!uri) return;
     // Always set an offset for the newly selected track. Otherwise a track
@@ -147,7 +148,12 @@ function readStoredOffset(raw) {
       config.rememberOffsets && typeof offsets[uri] === "number"
         ? offsets[uri]
         : 0;
-    applyOffset(ms);
+    restoringTrackOffset = true;
+    try {
+      applyOffset(ms);
+    } finally {
+      restoringTrackOffset = false;
+    }
   }
 
   function nudgeOffset(delta) {
@@ -229,7 +235,12 @@ function readStoredOffset(raw) {
     }
   });
   window.addEventListener("luma:sync-offset-changed", (e) => {
-    if (typeof e.detail?.ms === "number") rememberOffsetForTrack(getTrackUri(), e.detail.ms);
+    if (
+      !restoringTrackOffset &&
+      typeof e.detail?.ms === "number"
+    ) {
+      rememberOffsetForTrack(getTrackUri(), e.detail.ms);
+    }
   });
   onTrack();
 

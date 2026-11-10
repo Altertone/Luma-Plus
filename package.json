@@ -1,0 +1,14 @@
+{
+  "name": "luma-plus",
+  "version": "1.0.1",
+  "private": true,
+  "description": "Companion Spicetify extension for Luma Lyrics",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check luma-plus.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

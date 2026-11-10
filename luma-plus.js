@@ -1,4 +1,44 @@
 // Luma Plus — companion for Luma Lyrics (Spicetify extension)
+/* <luma-plus-pure> */
+function clampOffset(ms) {
+  const value = Number(ms);
+  return Number.isFinite(value)
+    ? Math.max(-5000, Math.min(5000, Math.round(value)))
+    : 0;
+}
+
+function normalizeConfig(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { shortcuts: true, rememberOffsets: true };
+  }
+  return {
+    shortcuts: value.shortcuts !== false,
+    rememberOffsets: value.rememberOffsets !== false,
+  };
+}
+
+function normalizeOffsets(value, limit = 400) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const valid = Object.entries(value).filter(
+    ([uri, ms]) => uri && Number.isFinite(ms),
+  );
+  const max = Math.max(0, Math.floor(Number(limit) || 0));
+  const kept = max ? valid.slice(-max) : [];
+  return Object.fromEntries(
+    kept.map(([uri, ms]) => [uri, clampOffset(ms)]),
+  );
+}
+
+function readStoredOffset(raw) {
+  try {
+    const settings = JSON.parse(raw || "{}");
+    return clampOffset(settings?.syncOffset);
+  } catch {
+    return 0;
+  }
+}
+/* </luma-plus-pure> */
+
 (async () => {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   while (!globalThis.Spicetify?.Player || !document.body) await wait(300);
@@ -11,9 +51,15 @@
   const MAX_OFFSETS = 400;
 
   const defaultConfig = { shortcuts: true, rememberOffsets: true };
+
+
   const loadJson = (k, d) => {
     try {
-      return { ...d, ...JSON.parse(localStorage.getItem(k) || "{}") };
+      const value = JSON.parse(localStorage.getItem(k) || "{}");
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return { ...d };
+      }
+      return { ...d, ...value };
     } catch {
       return { ...d };
     }
@@ -23,8 +69,8 @@
       localStorage.setItem(k, JSON.stringify(v));
     } catch {}
   };
-  let config = loadJson(CFG_KEY, defaultConfig);
-  let offsets = loadJson(OFFSET_KEY, {});
+  let config = normalizeConfig(loadJson(CFG_KEY, defaultConfig));
+  let offsets = normalizeOffsets(loadJson(OFFSET_KEY, {}), MAX_OFFSETS);
 
   const style = document.createElement("style");
   style.id = "luma-plus-style";
@@ -55,8 +101,19 @@
     return !!r && !r.hidden;
   };
 
+  function currentOffset() {
+    const api = globalThis.LumaLyrics;
+    if (api && typeof api.getState === "function") {
+      try {
+        const value = Number(api.getState()?.syncOffset);
+        if (Number.isFinite(value)) return clampOffset(value);
+      } catch {}
+    }
+    return readStoredOffset(localStorage.getItem("luma-settings"));
+  }
+
   function applyOffset(ms) {
-    const v = Math.max(-5000, Math.min(5000, Math.round(ms)));
+    const v = clampOffset(ms);
     const api = globalThis.LumaLyrics;
     if (api && typeof api.setSyncOffset === "function") {
       api.setSyncOffset(v);
@@ -74,7 +131,7 @@
 
   function rememberOffsetForTrack(uri, ms) {
     if (!config.rememberOffsets || !uri) return;
-    offsets[uri] = Math.max(-5000, Math.min(5000, Math.round(ms)));
+    offsets[uri] = clampOffset(ms);
     const keys = Object.keys(offsets);
     if (keys.length > MAX_OFFSETS) {
       for (const k of keys.slice(0, keys.length - MAX_OFFSETS)) delete offsets[k];
@@ -82,22 +139,25 @@
     saveJson(OFFSET_KEY, offsets);
   }
 
+  let restoringTrackOffset = false;
   function restoreOffsetForTrack(uri) {
-    if (!config.rememberOffsets || !uri) return;
-    const ms = offsets[uri];
-    if (typeof ms === "number") applyOffset(ms);
+    if (!uri) return;
+    // Always set an offset for the newly selected track. Otherwise a track
+    // without a saved value inherits the previous track's timing adjustment.
+    const ms =
+      config.rememberOffsets && typeof offsets[uri] === "number"
+        ? offsets[uri]
+        : 0;
+    restoringTrackOffset = true;
+    try {
+      applyOffset(ms);
+    } finally {
+      restoringTrackOffset = false;
+    }
   }
 
   function nudgeOffset(delta) {
-    const api = globalThis.LumaLyrics;
-    let current = 0;
-    if (api && typeof api.getState === "function") current = api.getState()?.syncOffset ?? 0;
-    else {
-      try {
-        current = Number(JSON.parse(localStorage.getItem("luma-settings") || "{}").syncOffset || 0);
-      } catch {}
-    }
-    const next = current + delta;
+    const next = clampOffset(currentOffset() + delta);
     applyOffset(next);
     rememberOffsetForTrack(getTrackUri(), next);
     toast(`Lyrics sync ${next > 0 ? "+" : ""}${(next / 1000).toFixed(2)}s`);
@@ -150,7 +210,7 @@
         nudgeOffset(50);
       } else if (k === "0") {
         e.preventDefault();
-        nudgeOffset(-(Number(JSON.parse(localStorage.getItem("luma-settings") || "{}").syncOffset || 0)));
+        applyOffset(0);
         rememberOffsetForTrack(getTrackUri(), 0);
         toast("Lyrics sync reset");
       }
@@ -175,15 +235,25 @@
     }
   });
   window.addEventListener("luma:sync-offset-changed", (e) => {
-    if (typeof e.detail?.ms === "number") rememberOffsetForTrack(getTrackUri(), e.detail.ms);
+    if (
+      !restoringTrackOffset &&
+      typeof e.detail?.ms === "number"
+    ) {
+      rememberOffsetForTrack(getTrackUri(), e.detail.ms);
+    }
   });
   onTrack();
 
   globalThis.LumaPlus = {
-    version: "1.0.0",
+    version: "1.0.1",
     getConfig: () => ({ ...config }),
-    setConfig: (next) => {
-      config = { ...config, ...next };
+    setConfig: (next = {}) => {
+      if (!next || typeof next !== "object" || Array.isArray(next)) return;
+      if (typeof next.shortcuts === "boolean") config.shortcuts = next.shortcuts;
+      if (typeof next.rememberOffsets === "boolean") {
+        config.rememberOffsets = next.rememberOffsets;
+        if (!config.rememberOffsets) applyOffset(0);
+      }
       saveJson(CFG_KEY, config);
     },
   };
